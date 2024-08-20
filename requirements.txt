@@ -1,0 +1,5 @@
+datasets
+safetensors
+torch==2.3.1 --index-url https://download.pytorch.org/whl/cu118
+transformers
+wandb
