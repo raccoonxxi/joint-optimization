@@ -150,7 +150,6 @@ def llama_sequential(model, dataloader, dev):
 @torch.no_grad()
 def llama_eval(model, testenc, dev,  dataset: str, log_wandb: bool = False):
     print("Evaluating ...")
-
     testenc = testenc.input_ids
     nsamples = testenc.numel() // model.seqlen
 
@@ -159,6 +158,8 @@ def llama_eval(model, testenc, dev,  dataset: str, log_wandb: bool = False):
     layers = model.model.layers
 
     model.model.embed_tokens = model.model.embed_tokens.to(dev)
+    model.model.norm = model.model.norm.to(dev)
+
     layers[0] = layers[0].to(dev)
 
     dtype = next(iter(model.parameters())).dtype
@@ -166,34 +167,51 @@ def llama_eval(model, testenc, dev,  dataset: str, log_wandb: bool = False):
         (nsamples, model.seqlen, model.config.hidden_size), dtype=dtype, device=dev
     )
     cache = {"i": 0, "attention_mask": None}
-
+    print("Good 1")
     class Catcher(nn.Module):
         def __init__(self, module):
             super().__init__()
             self.module = module
 
         def forward(self, inp, **kwargs):
-            inps[cache["i"]] = inp
+            #if kwargs.get("attention_mask") is not None:
+            #    print(f"Attention mask device: {kwargs['attention_mask'].device}")  # Check the attention mask device
+            #    cache["attention_mask"] = kwargs["attention_mask"].to(dev)  # Ensure it's on the correct device
+            #else:
+            #    print("Attention mask is None")
+            inps[cache["i"]] = inp.to(dev)
             cache["i"] += 1
-            cache["attention_mask"] = kwargs["attention_mask"]
+            #cache["attention_mask"] = kwargs["attention_mask"].to(dev)
+            if kwargs.get("attention_mask") is not None:
+               cache["attention_mask"] = kwargs["attention_mask"].to(dev)  # Ensure it's on the correct device
+            else:
+                cache["attention_mask"] = None  # Handle cases where attention_mask is None
+                print("kwargs.get(attention_mask) is NONE")
+
             raise ValueError
 
     layers[0] = Catcher(layers[0])
+    print(f"Model device: {model.device}")  # Check the batch tensor device
+
+    print("Good 1-2")
     for i in range(nsamples):
         batch = testenc[:, (i * model.seqlen) : ((i + 1) * model.seqlen)].to(dev)
         try:
             model(batch)
         except ValueError:
             pass
+    print("Good 1-3")
     layers[0] = layers[0].module
-
+    print("Good 2")
     layers[0] = layers[0].cpu()
     model.model.embed_tokens = model.model.embed_tokens.cpu()
+    model.model.norm = model.model.norm.cpu()
+
     torch.cuda.empty_cache()
 
     outs = torch.zeros_like(inps)
     attention_mask = cache["attention_mask"]
-
+    print("Good 3")
     for i in range(len(layers)):
         print(i)
         layer = layers[i].to(dev)
@@ -217,7 +235,7 @@ def llama_eval(model, testenc, dev,  dataset: str, log_wandb: bool = False):
     if model.model.norm is not None:
         model.model.norm = model.model.norm.to(dev)
     model.lm_head = model.lm_head.to(dev)
-
+    print("Good 5")
     testenc = testenc.to(dev)
     nlls = []
     for i in range(nsamples):
